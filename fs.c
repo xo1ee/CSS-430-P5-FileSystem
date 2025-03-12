@@ -100,7 +100,7 @@ i32 fsOpen(str fname)
 // ============================================================================
 i32 fsRead(i32 fd, i32 numb, void *buf)
 {
-	i8 tempBuf[BYTESPERBLOCK * 4];
+	i8 bioBuf[BYTESPERBLOCK * 4];
 	i8 *result = (i8 *)buf;
 	int curs = fsTell(fd);
 	int inum = bfsFdToInum(fd);
@@ -111,43 +111,26 @@ i32 fsRead(i32 fd, i32 numb, void *buf)
 	bfsReadInode(inum, &inode);
 
 	int bytesRead = 0; // Tracks how many bytes have been read successfully
-	int numBytes = 0;
+	int numBytes = 0;  // Tracks how many bytes are read per block
 	for (int fbn = startFBN; fbn < startFBN + numBlksToRead; fbn++)
 	{
-		if (fbn < 5)
-		{
-			bfsRead(inum, fbn, result);
-			if (numb <= 512 && curs + numb <= inode.size)
-				numBytes = numb;
-			else if (numb > 512 && curs + bytesRead <= inode.size)
-			{
-				if (bytesRead + 512 > numb)
-					numBytes = numb - bytesRead;
-				else
-					numBytes = 512;
-			}
-			else
-				numBytes = inode.size - (curs + bytesRead);
-		}
+		bfsRead(inum, fbn, result);
+		if (curs + bytesRead >= inode.size) // EOF hit
+			numBytes = inode.size - (curs + bytesRead);
 		else
-		{ // Indirect is currently causing seg fault
-			bioRead(inode.indirect, result);
-			numBytes = numb - (curs + bytesRead);
-		}
+			numBytes = (numb - bytesRead < 512) ? (numb - bytesRead) : 512;
 
-		memcpy(tempBuf + bytesRead, result, numBytes);
+		memcpy(bioBuf + bytesRead, result, numBytes);
 		bytesRead += numBytes;
 	}
 
-	if (bytesRead > 0)
+	if (bytesRead > 0) // If bytes were read, copy to buf and return # of bytes read
 	{
-		for (int i = curs; i < curs + bytesRead; i++)
-			result[i] = tempBuf[i];
+		memcpy(result, bioBuf, bytesRead);
 		bfsSetCursor(inum, curs + bytesRead);
 		return bytesRead;
 	}
-
-	FATAL(ENYI); // Not Yet Implemented!
+	
 	return 0;
 }
 
