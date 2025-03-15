@@ -116,11 +116,14 @@ i32 fsRead(i32 fd, i32 numb, void *buf)
     {
         bfsRead(inum, fbn, result);
         if (curs + bytesRead >= inode.size) // EOF hit
-            numBytes = inode.size - (curs + bytesRead);
+        {
+            numBytes = inode.size - (curs + bytesRead); // possibly negative if data doesn't fill entire block
+        }
         else
             numBytes = (numb - bytesRead < 512) ? (numb - bytesRead) : 512;
 
-        memcpy(bioBuf + bytesRead, result, numBytes);
+        if (numBytes > 0)
+            memcpy(bioBuf + bytesRead, result, numBytes);
         bytesRead += numBytes;
     }
 
@@ -210,8 +213,6 @@ void writeToBlock(i32 inum, i32 offset, i32 fbn, i32 numToWrite, i8 *buf)
 // ============================================================================
 i32 fsWrite(i32 fd, i32 numb, void *buf)
 {
-    printf("== ENTERING FSWRITE() ==\n");
-
     i32 inum = bfsFdToInum(fd);
     Inode inode;
     bfsReadInode(inum, &inode);
@@ -227,6 +228,17 @@ i32 fsWrite(i32 fd, i32 numb, void *buf)
     i32 leftToWrite = numb;
     i32 numToWrite = leftToWrite;
 
+    if (cursor + numb > inode.size)
+    {
+        i32 allocSize = (cursor + numb) - inode.size;
+
+        i32 blocksToAlloc = (allocSize / BYTESPERBLOCK) + 1;
+
+        i32 newFBN = (inode.size / BYTESPERBLOCK) + blocksToAlloc;
+        bfsExtend(inum, newFBN);
+        bfsWriteInode(inum, &inode);
+    }
+
     for (int i = 0; i < numBlocks; i++)
     {
         if (leftToWrite > BYTESPERBLOCK)
@@ -239,13 +251,17 @@ i32 fsWrite(i32 fd, i32 numb, void *buf)
         bfsSetCursor(inum, cursor + numToWrite);
         cursor = bfsTell(fd);
 
+        if (cursor > inode.size)
+        {
+            inode.size = cursor;
+            bfsWriteInode(inum, &inode);
+        }
+
         leftToWrite -= numToWrite;
         numToWrite = leftToWrite;
 
         startFBN++;
         offset = 0; // continuing to write onto the next block
     }
-
-    printf("=== EXITTING FSWRITE() ===\n");
     return 0;
 }
